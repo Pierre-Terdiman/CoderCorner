@@ -1,0 +1,39 @@
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/**
+ *	Contains simple stacks.
+ *	\file		IceStack.h
+ *	\author		Pierre Terdiman
+ *	\date		February, 5, 2000
+ */
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Include Guard
+#ifndef __ICESTACK_H__
+#define __ICESTACK_H__
+
+	class ICECORE_API LIFOStack : public Container
+	{
+		public:
+		// Constructor/Destructor
+		__forceinline					LIFOStack()					{}
+		__forceinline					~LIFOStack()				{}
+		// Management
+		__forceinline	LIFOStack&		Push(udword entry)			{	Add(entry);	return *this;	}
+						bool			Pop(udword &entry);
+	};
+
+	class ICECORE_API FIFOStack : public Container
+	{
+		public:
+		// Constructor/Destructor
+		__forceinline					FIFOStack() : mCurIndex(0)	{}
+		__forceinline					~FIFOStack()				{}
+		// Management
+		__forceinline	FIFOStack&		Push(udword entry)			{	Add(entry);	return *this;	}
+						bool			Pop(udword &entry);
+		private:
+						udword			mCurIndex;			//!< Current index within the container
+	};
+
+#endif // __ICESTACK_H__

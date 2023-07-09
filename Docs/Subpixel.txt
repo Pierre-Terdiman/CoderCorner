@@ -1,0 +1,285 @@
+
+
+
+Pour en finir avec le subpixel:
+==============================
+
+On a les points projetés Xs, Ys sur l'écran en flottants. Le but c'est de "rasteriser" ça le plus
+précisément possible, sachant qu'il faut passer à un moment ou à un autre en entier, au niveau de
+la scanline d'abord (en Y), puis du pixel (en X). En gros c'est encore un problème de sampling.
+
+Une bonne idée serait également de ne jamais tracer deux fois le même pixel (lorsque deux faces
+partagent un vertex, le point flottant Xs,Ys est le même pour les deux faces, donc correspondront
+au même pixel. Il ne faut pas le tracer deux fois, ça sert à rien et en plus ça nique la 
+transparence)
+
+Convention de rasterisation:
+
+Il y a différentes manières de réaliser la transformation flottant->entier. Ca parait idiot mais
+c'est un point plus délicat que ce qu'on pourrait croire: toutes les sorties de texture viennent
+de là en général.
+
+Pour ne pas se compliquer la vie, on ne travaille que sur des nombres positifs:
+0.0 <= Xs < ScreenWidth
+0.0 <= Ys < ScreenHeight
+
+Ce qui existe:
+
+Le floor:
+1.1  ->  1
+1.9  ->  1
+
+Le ceil:
+1.1  ->  2
+1.9  ->  2
+
+Le best:
+1.1  -> 1
+1.9  -> 2
+
+On choisit le floor, soit une convention bas-gauche (Xs,Ys->pixel décalé vers le bas à cause du
+floor du Ys, et vers la gauche à cause du floor du Xs).
+
+Okee, voilà un pixel, c'est le premier de l'écran:
+  _______
+ |       |
+ |       |
+ |   *   |
+ |       |
+ |_______|
+
+Donc tous les points 0.0 <= Xs,Ys <1.0 correspondent à ce pixel. L'abscisse Xs=0.0 correspond
+précisément au côté gauche de ce pixel. Xs=1.0 correspond à son côté droit, soit le pixel voisin.
+L'ordonnée Ys=0.0 correspond au côté haut de ce pixel, Ys=1.0 au côté bas, soit le pixel du
+dessous. En clair, le sampling est réalisé sur les edges du pixel. C'est contraire à ce qu'on
+trouve dans la littérature classique: en général le sampling est réalisé au point * (le centre
+du pixel). Mais bon, ceux qui ont écrit ça n'ont jamais codé la chose: c'est débile de sampler
+au centre, on se balade avec des +/- 0.5 partout derrière, c'est complètement con et ça sert à
+rien (c'est juste plus intuitif et plus simple à expliquer dans un bouquin, quoi).
+
+Ok: en passant de float à long, on va donc commettre une erreur Ex et une erreur Ey:
+
+Ex = Xs - floor(Xs);
+Ey = Ys - floor(Ys);
+
+Avec en évidence 0.0 <= Ex,Ey < 1.0. 
+
+Bon, le gradient pour le subpixel c'est dx/dy. Si on le calcule en float, on est sûr d'obtenir
+une précision maximale: c'est le "vrai" gradient. Le prix à payer c'est les cas où dy est très
+petit. On laisse ça de côté pour tout-à-l'heure.
+
+Interpolons:
+On part de Xs (en float!), on ajoute le gradient (en float!), on utilise Xs, on ajoute le 
+gradient, on utilise Xs, etc. Tout va bien, tout est parfait, tout est précis. Xs est bien sûr
+tout de même converti en entier, mais ça on ne peut pas l'éviter! (On peut tout de même utiliser
+Ex pour adapter le rendu et faire de l'antialiasing, mais on verra ça un autre jour)
+
+Sauf que y'a un bug. Le Xs obtenu est le vrai Xs correspondant au vrai Ys. Que l'on utilise pas.
+Le premier niveau de sampling se situe ici: le Xs on va l'utiliser pour remplir la ligne 
+floor(Ys), et pas la ligne Ys... Il faut donc modifier Xs en fonction de Ey. C'est assez facile
+en fait, il suffit de considérer qu'on part de floor(Ys), et adapter le Xs (flottant) de départ,
+tout en conservant le vrai gradient. En clair, ça revient à calculer le Xs résultant de
+l'intersection de la droite portant l'edge avec le haut du pixel correspondant à Xs,Ys.
+
+Voilà un pixel avec en bas à droite le boût de polygone à tracer. Le point d'intersection des
+deux edges c'est Xs,Ys.
+  _______
+ |       |
+ |       |
+ |    ___|    (1)
+ |   /   |
+ |__/____|
+
+Malheureusement en passant Ys en entier on "remonte" Ys sur le côté haut du pixel. Si on ne
+modifie pas Xs en conséquence, le polygône tracé sera en fait:
+  _______
+ |   /   |
+ |  /    |
+ | /     |    (2)
+ |/      |
+ |_______|
+
+...et on tracera ce même polygône pour TOUS les points dont l'ordonnée Ys se promène sur la
+droite verticale passant par Xs! (1.5, 1.1) et (1.5, 1.9) seront rendus de la même manière par
+exemple. Pas top.
+
+Pire: si Ys diminue, que se passe t-il? Ys diminue, et remonte jusqu'à être réellement sur le
+côté haut du pixel. C'est le seul cas où le polygône tracé (2) est le bon. Ensuite Ys diminue
+encore et passe au pixel inférieur. Paf! D'un coup on le floor pour le coller au côté haut du
+pixel inférieur! On trace encore (2), mais un pixel en dessous du précédent. Visuellement on
+saute brusquement d'un pixel à l'autre, en utilisant toujours la même sub-configuration (2). 
+Le but du subpixel, c'est justement d'éviter ce saut en interpolant linéairement entre deux
+pixels..
+
+Pour ça, il suffit dans l'exemple (1) d'augmenter Xs au fur et à mesure que l'on descend Ys vers
+le côté haut du pixel. (Xs est décalé vers la droite jusqu'à l'intersection de l'edge avec le
+bord)
+
+La correction de Xs est alors trivialement:  Xs = Xs + Ey * Gradient
+(+ à cause de la convention gauche, et Ey est positif)
+La correction doit être réalisée uniquement sur le Xs de départ.
+
+
+
+Combien de pixels tracer?
+========================
+
+La question chiante, c'est toujours la suivante: comment calculer le nombre de lignes à tracer?
+Ca a l'air idiot comme question, non? C'est plus subtil que ce qu'on peut croire, et on a vite
+fait de tracer des polygônes très moches si on ne fait pas attention à ça.
+
+On peut prendre (long)(Ys2-Ys1) ou (long)(Ys2)-(long)(Ys1). En général on est tenté par la
+première solution puisqu'on a déjà le Ys2-Ys1 nécessaire pour le calcul du gradient. Voyons 
+voir...
+
+Soit un segment qui commence en Ys1 = 1.1 et qui finit en Ys2 = 6.9. On a donc dY = 6.9-1.1 = 5.8
+Par contre si on va de 1.9 à 6.1, ça donne 6.1 - 1.9 = 4.2
+
+Dans le premier cas le passage en entier donne 5 lignes et 4 dans le second. Pire: si on calcule
+le dY dans l'autre sens (1.1-6.9 par exemple, ce qui peut arriver avec certaines méthodes de
+rasterisation) le passage en entier pourra donner -6 suivant les conventions adoptées, le mode
+d'arrondi du FPU, etc. Une horreur, quoi.
+
+On oublie donc bien vite la première méthode, et on passe à la suivante:
+(long)(Ys2) - (long)(Ys1) = 6 - 1 = 5 (floor) 
+                          = 7 - 2 = 5 (ceil)
+                          = 7 - 1 = 6 (best)
+
+Inutile de tergiverser: le mode best n'est a priori jamais utilisé. On utilise plutôt la
+convention floor qui est cohérente avec notre convention bas-gauche. Même si pour ce calcul
+précis, floor ou ceil donnent bien sûr toujours les mêmes résultats.
+
+
+ Les mêmes résultats?
+
+ Que nenni, messire!
+
+ Cas d'école:
+ Ys1 = 1.8
+ Ys2 = 6.0
+
+(long)(Ys2) - (long)(Ys1) = 6 - 1 = 5 (floor) 
+                          = 6 - 2 = 4 (ceil)
+                          = 6 - 2 = 4 (best)
+
+Terrible, non? Celui qui a dit que le calcul du nombre de lignes à tracer était trivial n'a même
+pas compris le début du problème!
+
+J'ai tendance à préférer la convention floor. Pourquoi? Pour comprendre il manque un élément de
+réponse. Pour l'instant acceptons juste cette idée: on prend la convention floor, et on continue
+à rasteriser.
+ 
+(A noter au passage qu'on peut maintenant à loisir calculer dY ou -dY, on tombera toujours sur un
+résultat valide, puisque le floor sera toujours effectué sur des nombres positifs.)
+
+Bien. Nous disions donc: on part de 1.1, on va en 6.9, donc a priori on parcourt les lignes entre
+1 et 6 comprises. Yep! Ca fait 6 lignes, ça, pas 5. L'Erreur fatale tient dans la phrase 
+suivante:
+
+"Pour aller de la ligne Y1 à la ligne Y2 il y a Y2-Y1+1 pixels, donc je trace Y2-Y1+1 lignes!"
+
+Pouf! Dans le mur! Il faut bel et bien tracer Y2-Y1 lignes uniquement. Tout simplement pour
+éviter de tracer deux fois les mêmes pixels. Si le sommet Xs,Ys est partagé par le bas d'une face
+et le haut d'une autre, tracer Y2-Y1+1 lignes revient à tracer deux fois Ys, une fois comme
+dernière ligne de la première face, ensuite comme première ligne de la seconde.... Non seulement
+c'est pas top pour la transparence, mais en plus ça produit des polygônes pas jolis. On oublie.
+
+Notons que les polygônes Y0=Y1=Y2 ne seront donc pas tracés du tout. Ca parait choquant mais
+c'est bien la bonne approche pour obtenir le meilleur rendu. Ca règle aussi le problème du calcul
+du gradient en flottant: calculer dX/dY avec dY epsilonesque, ça peut conduire à des catastrophes.
+Ici pas de problèmes: si dY est epsilonesque, Y2-Y1 sera nul, et on ne calculera même pas le
+gradient. 
+
+C'est précisément la raison du choix de la convention floor tout à l'heure!
+
+Cas d'école:
+Ys1 = 0.0
+Ys2 = 0.00000001
+
+(long)(Ys2) - (long)(Ys1) = 0 - 0 = 0 (floor) 
+                          = 1 - 0 = 1 (ceil)
+
+Dans le cas du floor, on détecte que le nombre de scanlines est nul, et puisque on a décidé de
+tracer Y2-Y1 lignes (et pas Y2-Y1+1) on s'arrête là.
+
+Dans le cas du ceil, on doit tout de même tracer une ligne, donc calculer un gradient. Et les
+emmerdements commencent..... car il faut diviser par epsilon, et ça c'est pénible. En flottant
+c'est pas le pire. Certaines routines qui bossent en virgule fixe ont plus de problèmes, et ont
+vite fait de partir en overflow. C'est ce qui pousse en général les gens à produire un boût de
+code spécial pour traiter ces cas particuliers. Matts Byggmastar, dans Fatmap2.txt, utilise ici
+l' "inverse of height using only 18:14 bit precision". Si c'est pas chiant, ça! En flottant y'a
+moins de problèmes, mais tout de même. C'est très vicieux en plus: une division par zéro en
+flottant ne plantera pas, elle se contentera de générer une exception et de bouffer quelques
+dizaines de cycles pour ça, ralentissant l'ensemble tout en passant en général inaperçue... Pas
+top. Pour éviter tous ces problèmes je préfère la convention floor, qui court-circuite tout ça.
+C'est le seul point discutable de toute cette histoire: les triangles y0=y1=y2 ne sont pas
+tracés. Dans le cas d'un renderer de base c'est parfaitement invisible. Maintenant je ne sais pas
+ce que ça devient si on parle d'antialiasing, de A-Buffer, etc. A voir.
+
+Ok, la solution à retenir est donc bien la seconde solution proposée en introduction, ce qui
+implique que le dY doit être calculé DEUX FOIS, une fois pour le nombre de scanlines, une fois
+pour le calcul du gradient, qui lui doit être fait très précisément.
+
+En résumé: 
+
+nombre de scanlines à tracer = floor(Ys2) - floor(Ys1)
+
+...plus subtil que ce qu'on pourrait croire...
+
+
+
+Le dX marche de la même manière en convention gauche:
+nombre de pixels à tracer par scanline = floor(Xs2) - floor(Xs1)
+Et les segments X1=X2 ne seront pas tracés.
+
+Je rappelle que tous ces Xs et Ys doivent être positifs.
+
+
+Note:
+
+Ca implique que la dernière ligne et la dernière colonne de l'écran ne seront jamais tracés. Un
+moyen standard pour éviter ça consiste à clipper un pixel plus loin dans les deux directions.
+
+
+
+Le subtexel:
+===========
+
+On sait maintenant comment tracer un polygône en précision subpixelesque (beaucoup plus 
+précisément d'ailleurs que tout ce qu'on peut trouver dans les bouquins, pour lesquels le
+"subpixel" consiste simplement à découper un pixel en plusieurs sous-pixels (ou "sub-pixels"),
+par exemple souvent 4*4 sous-pixels à l'intérieur d'un pixel unique. Mais ils ne font que 
+repousser le problème du sampling à un niveau plus profond, au niveau du sous-pixel, et la
+solution au final c'est... de l'over-sampling!...mais pour des sous-pixels!!! c'est absolument
+débile cette histoire! Ici on a vu comment interpoler linéairement d'un pixel à l'autre, de
+manière continue. On peut voir ça comme de "l'over-sampling en connexité infinie" (comme dirait
+l'autre) mais bon...)
+
+
+Le subtexel, c'est la même chose, mais au niveau texels et interpolation des U,V. 
+
+Ok, interpolons U et V le long des edges (en Y) et le long des scanlines (en X). La première
+erreur consiste à faire du sub-pixel sur les texels! C'est-à-dire corriger les U et V initiaux
+en fonction de l'erreur Ey: ça n'a rien à voir. U0 et V0 sont associés au vertex Xs0, Ys0 quelle
+que soit sa position sur l'écran. L'échantillonage du Ys n'a aucune raison d'influencer la 
+position initiale dans la texture... Le gradient est calculé en flottant, normal, rien à signaler.
+
+Les ennuis commencent lorsqu'on passe Xs en entier. Le problème est le même que pour Ys, et la
+solution est la même également: on modifie les U et V (du départ de la scanline) en fonction de
+l'erreur Ex cette fois. Soit:
+
+UInit = UInit + Ex * gradient
+
+Le gradient en question c'est bien sûr dU / dX calculé en flottant. (même punition pour V)
+
+
+Voilà, le seul ennui c'est que ça rajoute deux multiplications par scanline. On doit pouvoir 
+passer outre avec une DDA bien placée.
+
+
+
+
+
+
+Pierre Terdiman
+Juin 1998

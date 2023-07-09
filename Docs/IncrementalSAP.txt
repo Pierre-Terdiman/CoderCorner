@@ -1,0 +1,133 @@
+
+More sweep-and-prune notes: about pair management in incremental SAP
+====================================================================
+
+ Somebody asked me about this topic in a private email on the Bullet forums. So here's how I did it in the past.
+
+
+ The usual functions to add & remove pairs during the SAP updates are like this:
+
+void SweepAndPrune::AddPair(const void* object0, const void* object1, uword id0, uword id1)
+{
+    // mPairs is a pair manager structure containing active pairs.
+    // The following call adds the pair to the structure. If the pair is a new one, a new internal "SAP_Pair" structure
+    // is allocated for it, and returned. If the pair was already there before, its previously allocated "SAP_Pair" is
+    // returned.
+    SAP_Pair* UP = (SAP_Pair*)mPairs.addPair(id0, id1, null, null);
+    ASSERT(UP);
+
+    // The "object0" and "object1" pointers are null for newly created pairs.
+    if(UP->object0)
+    {
+        // This is a persistent pair => nothing to do (we don't need to notify the user)
+        ASSERT(UP->IsInArray());
+    }
+    else
+    {
+        // This is a new pair. First, we update object pointers.
+        UP->object0 = object0;
+        UP->object1 = object1;
+
+        // Then we set a flag saying that the pair is in the "mKeys" array (and we add the pair to the array)
+        // mKeys will be processed later in a second pass.
+        //
+        // We store pair indices in mKeys because pointers would be invalidated when the array is resized in "addPair"
+        // operations. The indices are guaranteed to stay valid because we never remove pairs here (it's done later in a
+        // second pass)
+        UP->SetInArray();
+        mKeys.Add(mPairs.getPairIndex(UP));
+    }
+    // Mark the pair as added
+    UP->ClearRemoved();
+}
+
+void SweepAndPrune::RemovePair(const void* object0, const void* object1, uword id0, uword id1)
+{
+    // We try to find the pair in the array of active pairs
+    SAP_Pair* UP = (SAP_Pair*)mPairs.findPair(id0, id1);
+    if(UP)
+    {
+        // The pair was found in the array => we have to remove it. If the pair is not already in mKeys, add
+        // it to this array and update the flag. If it's already marked as "in the array", it might be a double
+        // removal of the same pair => nothing to do then, it has already been taken care of the first time.
+        if(!UP->IsInArray())
+        {
+            // Setup flag saying that pair is in "mKeys", then add to this array
+            UP->SetInArray();
+            mKeys.Add(mPairs.getPairIndex(UP));
+        }
+        // Mark the pair as removed
+        UP->SetRemoved();
+    }
+    // else the pair was not in the array => nothing to do
+}
+
+ So, we update the SAP for all objects, things get added to mKeys. After all the updates, we dump active pairs using the
+ following function. There are two callbacks, one for newly created pairs, one for deleted pairs. The list of currently
+ active pairs is always available in a contiguous linear array, whose start is "mPairs.activePairs".
+
+udword SweepAndPrune::DumpPairs(SAP_CreatePair create_cb, SAP_DeletePair delete_cb, void* cb_user_data)
+{
+    // Parse all the entries in mKeys
+    const udword* Entries = mKeys.GetEntries();
+    const udword* Last = Entries + mKeys.GetNbEntries();
+    mKeys.Reset(); // Reset for next time
+    udword* ToRemove = (udword*)Entries;
+    while(Entries!=Last)
+    {
+        udword ID = *Entries++;  // This is what we stored before as "getPairIndex"
+        SAP_Pair* UP = mPairs.activePairs + ID;   // Fetch back concerned pair
+        ASSERT(UP->IsInArray());  // It comes from mKeys this must be true
+
+        // The pairs here have been either added or removed. We previously marked added ones with "ClearRemoved" and
+        // removed ones with "SetRemoved". Use this flag now.
+        if(UP->IsRemoved())
+        {
+            // No need to call "ClearInArray" in this case, since the pair will get removed anyway
+
+            // Remove callback
+            if(delete_cb)
+                (delete_cb)(UP->GetObject0(), UP->GetObject1(), cb_user_data, UP->userData);
+
+            // We don't remove the pair immediately to make sure the indices we're parsing are still valid.
+            // So we will actually remove the pairs in a third pass below. We reuse the same buffer here, to
+            // save some memory.
+            *ToRemove++ = udword(UP->id0)<<16|UP->id1;
+        }
+        else
+        {
+            // This is a new pair. It is not in the mKeys array anymore after processing, so we clear the flag.
+            UP->ClearInArray();
+
+            // Add callback
+            if(create_cb)
+                UP->userData = (create_cb)(UP->GetObject0(), UP->GetObject1(), cb_user_data);
+        }
+    }
+
+    // 3rd pass to do the actual removals.
+    Entries = mKeys.GetEntries();
+    while(Entries!=ToRemove)
+    {
+        udword ID = *Entries++;
+        udword id0 = ID>>16;     // ID of first pair
+        udword id1 = ID&0xffff;  // ID of second pair
+        bool Status = mPairs.removePair(id0, id1);
+        ASSERT(Status);
+    }
+
+    // Return number of active pairs
+    return mPairs.nbActivePairs;
+}
+
+And that's about it. mPairs is a "PairManager" (www.codercorner.com/PairManager.rar), a bit modified to hold object pointers
+and user-data. "mKeys" is a simple "Container" (like an STL-vector of ints). Everything is O(1), there are no linked lists,
+only linear arrays, and memory usage is quite small (O(number of active pairs) for the pair manager, O(number of changed pairs)
+for mKeys).
+
+That's just one way to implement this, maybe not the most efficient or anything, but quite solid.
+
+
+- Pierre Terdiman
+pierre@codercorner.com
+June, 20, 2007

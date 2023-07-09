@@ -1,0 +1,45 @@
+<html>
+<body>
+<pre>
+<h1>Build Log</h1>
+<h3>
+--------------------Configuration: Radix - Win32 Release--------------------
+</h3>
+<h3>Command Lines</h3>
+Creating temporary file "C:\WINDOWS\TEMP\RSP3106.TMP" with contents
+[
+/nologo /G6 /MD /W3 /O2 /D "WIN32" /D "NDEBUG" /D "_CONSOLE" /D "_MBCS" /Fp"Release/Radix.pch" /Yu"stdafx.h" /Fo"Release/" /Fd"Release/" /FD /c 
+"Y:\APPs\# CoderCorner\Radix\IceRevisitedRadix.cpp"
+"Y:\APPs\# CoderCorner\Radix\Radix.cpp"
+]
+Creating command line "cl.exe @C:\WINDOWS\TEMP\RSP3106.TMP" 
+Creating temporary file "C:\WINDOWS\TEMP\RSP3110.TMP" with contents
+[
+/nologo /G6 /MD /W3 /O2 /D "WIN32" /D "NDEBUG" /D "_CONSOLE" /D "_MBCS" /Fp"Release/Radix.pch" /Yc"stdafx.h" /Fo"Release/" /Fd"Release/" /FD /c 
+"Y:\APPs\# CoderCorner\Radix\StdAfx.cpp"
+]
+Creating command line "cl.exe @C:\WINDOWS\TEMP\RSP3110.TMP" 
+Creating temporary file "C:\WINDOWS\TEMP\RSP3111.TMP" with contents
+[
+kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /incremental:no /pdb:"Release/Radix.pdb" /machine:I386 /out:"Release/Radix.exe" 
+".\Release\IceRevisitedRadix.obj"
+".\Release\Radix.obj"
+".\Release\StdAfx.obj"
+]
+Creating command line "link.exe @C:\WINDOWS\TEMP\RSP3111.TMP"
+<h3>Output Window</h3>
+Compiling...
+StdAfx.cpp
+Compiling...
+IceRevisitedRadix.cpp
+Radix.cpp
+Generating Code...
+Linking...
+
+
+
+<h3>Results</h3>
+Radix.exe - 0 error(s), 0 warning(s)
+</pre>
+</body>
+</html>
